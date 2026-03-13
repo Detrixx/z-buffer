@@ -1,0 +1,9 @@
+1. HOTOVO: Definice tělesa ib, vb, part buffer
+2. HOTOVO: (M) Modelovací transformace = model space -> world space
+3. HOTOVO: (V) Kamera (pohledová tranformace) = world space -> view space
+4. HOTOVO: (P) Projekce (projekční transformace persp/orth) = view space -> clip space
+5. TODO: Ořezaní fast, ořezání z, ořezání x,y
+6. HOTOVO: Dehomogenizace -> NDC
+7. HOTOVO: Tranformace do okna obrazovky
+8. HOTOVO: Rasterizace trojúhelníky
+9. HOTOVO: Viditelnost - ZBuffer
