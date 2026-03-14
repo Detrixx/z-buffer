@@ -1,6 +1,7 @@
 package renderer;
 
 import model.Part;
+import model.TopologyType;
 import model.Vertex;
 import rasterize.LineRasterizer;
 import rasterize.TriangleRasterizer;
@@ -35,73 +36,59 @@ public class RendererSolid {
     }
 
     public void render(Solid solid) {
-        Mat4 mvp = solid.getModel().mul(view).mul(projection);
+        Mat4 model = solid.getModel();
+        Mat4 mvp = model.mul(view).mul(projection);
 
         for (Part part : solid.getPartBuffer()) {
-            switch (part.getType()) {
-                case LINES:
-                    int index = part.getStartIndex();
-                    for (int i = 0; i < part.getCount(); i++) {
-                        int indexA = solid.getIndexBuffer().get(index++);
-                        int indexB = solid.getIndexBuffer().get(index++);
+            if (part.getType() == TopologyType.TRIANGLES) {
+                for (int i = 0; i < part.getCount(); i++) {
+                    int indexA = solid.getIndexBuffer().get(part.getStartIndex() + i * 3);
+                    int indexB = solid.getIndexBuffer().get(part.getStartIndex() + i * 3 + 1);
+                    int indexC = solid.getIndexBuffer().get(part.getStartIndex() + i * 3 + 2);
 
-                        Vertex a = solid.getVertexBuffer().get(indexA);
-                        Vertex b = solid.getVertexBuffer().get(indexB);
+                    Vertex vA = solid.getVertexBuffer().get(indexA);
+                    Vertex vB = solid.getVertexBuffer().get(indexB);
+                    Vertex vC = solid.getVertexBuffer().get(indexC);
 
-                        a = transform(a, mvp);
-                        b = transform(b, mvp);
-                        
-                        if (a.getPosition().getW() <= 0 || b.getPosition().getW() <= 0) continue; 
-                        
-                        a = dehomog(a);
-                        b = dehomog(b);
+                    Vertex pA = new Vertex(vA.getPosition().mul(mvp), vA.getColor(), vA.getUv(), vA.getNormal());
+                    Vertex pB = new Vertex(vB.getPosition().mul(mvp), vB.getColor(), vB.getUv(), vB.getNormal());
+                    Vertex pC = new Vertex(vC.getPosition().mul(mvp), vC.getColor(), vC.getUv(), vC.getNormal());
+                    
 
-                        a = transformToWindow(a);
-                        b = transformToWindow(b);
+                    Mat3 rotScale = new Mat3(
+                        new Vec3D(model.get(0,0), model.get(0,1), model.get(0,2)),
+                        new Vec3D(model.get(1,0), model.get(1,1), model.get(1,2)),
+                        new Vec3D(model.get(2,0), model.get(2,1), model.get(2,2))
+                    );
+                    
+                    Vec3D nA = vA.getNormal().mul(rotScale);
+                    Vec3D nB = vB.getNormal().mul(rotScale);
+                    Vec3D nC = vC.getNormal().mul(rotScale);
+                    
+                    Vertex wA = new Vertex(vA.getPosition().mul(model), vA.getColor(), vA.getUv(), nA);
+                    Vertex wB = new Vertex(vB.getPosition().mul(model), vB.getColor(), vB.getUv(), nB);
+                    Vertex wC = new Vertex(vC.getPosition().mul(model), vC.getColor(), vC.getUv(), nC);
 
-                        lineRasterizer.rasterize(a, b);
+                    if (pA.getPosition().getW() <= 0 || pB.getPosition().getW() <= 0 || pC.getPosition().getW() <= 0) continue;
+
+                    pA = dehomog(pA);
+                    pB = dehomog(pB);
+                    pC = dehomog(pC);
+
+                    pA = transformToWindow(pA);
+                    pB = transformToWindow(pB);
+                    pC = transformToWindow(pC);
+                    
+                    if (wireframe) {
+                        lineRasterizer.rasterize(pA, pB);
+                        lineRasterizer.rasterize(pB, pC);
+                        lineRasterizer.rasterize(pC, pA);
+                    } else {
+                        renderTriangle(pA, pB, pC, wA, wB, wC, solid.getShader());
                     }
-                    break;
-                case TRIANGLES:
-                    index = part.getStartIndex();
-                    for (int i = 0; i < part.getCount(); i++) {
-                        int indexA = solid.getIndexBuffer().get(index++);
-                        int indexB = solid.getIndexBuffer().get(index++);
-                        int indexC = solid.getIndexBuffer().get(index++);
-
-                        Vertex a = solid.getVertexBuffer().get(indexA);
-                        Vertex b = solid.getVertexBuffer().get(indexB);
-                        Vertex c = solid.getVertexBuffer().get(indexC);
-
-                        a = transform(a, mvp);
-                        b = transform(b, mvp);
-                        c = transform(c, mvp);
-
-                        if (a.getPosition().getW() <= 0 || b.getPosition().getW() <= 0 || c.getPosition().getW() <= 0) continue;
-
-                        a = dehomog(a);
-                        b = dehomog(b);
-                        c = dehomog(c);
-
-                        a = transformToWindow(a);
-                        b = transformToWindow(b);
-                        c = transformToWindow(c);
-                        
-                        if (wireframe) {
-                            lineRasterizer.rasterize(a, b);
-                            lineRasterizer.rasterize(b, c);
-                            lineRasterizer.rasterize(c, a);
-                        } else {
-                            renderTriangle(a, b, c, solid.getShader());
-                        }
-                    }
-                    break;
+                }
             }
         }
-    }
-
-    private Vertex transform(Vertex v, Mat4 mat) {
-        return new Vertex(v.getPosition().mul(mat), v.getColor(), v.getUv());
     }
 
     private Vertex dehomog(Vertex v) {
@@ -115,18 +102,10 @@ public class RendererSolid {
         double x = (v.getX() + 1) * (width - 1) / 2.0;
         double y = (1 - v.getY()) * (height - 1) / 2.0;
         
-        return new Vertex(new Point3D(x, y, v.getZ()), v.getColor(), v.getUv());
+        return new Vertex(new Point3D(x, y, v.getZ()), v.getColor(), v.getUv(), v.getNormal());
     }
 
-    public void setLineRasterizer(LineRasterizer lineRasterizer) {
-        this.lineRasterizer = lineRasterizer;
-    }
-
-    public void setTriangleRasterizer(TriangleRasterizer triangleRasterizer) {
-        this.triangleRasterizer = triangleRasterizer;
-    }
-
-    public void renderTriangle(Vertex a, Vertex b, Vertex c, Shader shader) {
-        triangleRasterizer.rasterize(a, b, c, shader);
+    public void renderTriangle(Vertex pA, Vertex pB, Vertex pC, Vertex wA, Vertex wB, Vertex wC, Shader shader) {
+        triangleRasterizer.rasterize(pA, pB, pC, wA, wB, wC, shader);
     }
 }

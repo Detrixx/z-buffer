@@ -6,9 +6,7 @@ import rasterize.LineRasterizer;
 import rasterize.LineRasterizerDDA;
 import rasterize.TriangleRasterizer;
 import renderer.RendererSolid;
-import shader.Shader;
-import shader.ShaderConstant;
-import shader.ShaderInterpolated;
+import shader.*;
 import solid.*;
 import transforms.*;
 import view.Panel;
@@ -31,7 +29,11 @@ public class Controller3D {
     private BufferedImage texture;
 
     private final List<Solid> solids = new ArrayList<>();
-    private int activeSolidIndex = 0;
+    private int activeSIndex = 0;
+    
+    // Osvětlení
+    private Vec3D lightPos = new Vec3D(0, 0, 3);
+    private Solid light;
     
     private boolean wireframe = false;
 
@@ -49,9 +51,12 @@ public class Controller3D {
         renderer = new RendererSolid(lineRasterizer, triangleRasterizer);
 
         try {
-            texture = ImageIO.read(new File("./res/textures/sandstone.jpg"));
+
+            //texture = ImageIO.read(new File("C:/repository/z-buffer/pgrf2-2026-c02-master/res/textures/sandstone.jpg"));
+
+            texture = ImageIO.read(new File("pgrf2-2026-c02-master/src/textures/sandstone.jpg"));
         } catch (IOException e) {
-            System.out.println("chyba textura");
+            System.out.println("chyba textura: " + e.getMessage());
         }
 
         // telesa
@@ -59,13 +64,20 @@ public class Controller3D {
         solids.add(new Sphere());
         solids.add(new Cone());
         
-        solids.get(0).setModel(new Mat4Transl(-2, 0, 0));
-        solids.get(1).setModel(new Mat4Transl(0, 0, 0));
-        solids.get(2).setModel(new Mat4Transl(2, 0, 0));
+        // Rozmístění těles ve scéně
+        solids.get(0).setModel(new Mat4Transl(-2, 0, 0)); 
+        solids.get(1).setModel(new Mat4Transl(0, 0, 0));  
+        solids.get(2).setModel(new Mat4Transl(2, 0, 0));  
         
-        // kamera
+        // Vizualizace zdroje světla
+        light = new Sphere();
+        light.setShader(new ShaderConstant(new Col(0xffff00)));
+        light.setModel(new Mat4Scale(0.1).mul(new Mat4Transl(lightPos)));
+        solids.add(light);
+        
+        // Inicializace kamery
         camera = new Camera()
-                .withPosition(new Vec3D(0, -5, 2))
+                .withPosition(new Vec3D(0, -7, 2))
                 .withAzimuth(Math.toRadians(90))
                 .withZenith(Math.toRadians(-20));
         
@@ -95,7 +107,7 @@ public class Controller3D {
             public void mouseDragged(MouseEvent e) {
                 int dx = startX - e.getX();
                 int dy = startY - e.getY();
-
+                
                 double sensitivity = 0.005;
                 
                 camera = camera.addAzimuth(dx * sensitivity);
@@ -111,30 +123,46 @@ public class Controller3D {
         panel.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
-                Solid activeSolid = solids.get(activeSolidIndex);
+                Solid activeSolid = solids.get(activeSIndex);
 
+                // Shader
                 if(e.getKeyCode() == KeyEvent.VK_U)
                     activeSolid.setShader(new ShaderConstant());
                 if(e.getKeyCode() == KeyEvent.VK_I)
                     activeSolid.setShader(new ShaderInterpolated());
-                if(e.getKeyCode() == KeyEvent.VK_O && texture != null) {
+                if(e.getKeyCode() == KeyEvent.VK_L) {
+                    // Zapnutí Phongova osvětlení
+                    activeSolid.setShader(new ShaderPhong(lightPos, new Col(0xffffff), new Col(0.2, 0.2, 0.2)));
+                }
+                if(e.getKeyCode() == KeyEvent.VK_O) {
+                    if (texture != null) {
                         Shader shader = new Shader() {
                             @Override
                             public Col getColor(Vertex pixel) {
-                                int x = (int) (pixel.getUv().getX() * (texture.getWidth() - 1));
-                                int y = (int) (pixel.getUv().getY() * (texture.getHeight() - 1));
-                                if (x < 0) x = 0; if (x >= texture.getWidth()) x = texture.getWidth() - 1;
-                                if (y < 0) y = 0; if (y >= texture.getHeight()) y = texture.getHeight() - 1;
+
+                                double u = pixel.getUv().getX();
+                                double v = pixel.getUv().getY();
+                                
+
+                                u = Math.max(0, Math.min(u, 1));
+                                v = Math.max(0, Math.min(v, 1));
+
+                                int x = (int) Math.round(u * (texture.getWidth() - 1));
+                                int y = (int) Math.round(v * (texture.getHeight() - 1));
+                                
                                 return new Col(texture.getRGB(x, y));
                             }
                         };
                         activeSolid.setShader(shader);
+                    } else {
+                        System.out.println("chyba textura");
+                    }
                 }
                 
-                // Přepínání těles
+                // Přepínání tělesa
                 if (e.getKeyCode() == KeyEvent.VK_TAB) {
-                    activeSolidIndex++;
-                    if (activeSolidIndex >= solids.size()) activeSolidIndex = 0;
+                    activeSIndex++;
+                    if (activeSIndex >= solids.size()) activeSIndex = 0;
                 }
                 
                 // Wireframe
@@ -147,6 +175,7 @@ public class Controller3D {
                 Mat4 model = activeSolid.getModel();
                 double step = 0.1;
                 
+                // Translace pouze pomocí šipek
                 if (e.getKeyCode() == KeyEvent.VK_LEFT) {
                     model = model.mul(new Mat4Transl(-step, 0, 0)); change = true;
                 }
@@ -159,17 +188,19 @@ public class Controller3D {
                 if (e.getKeyCode() == KeyEvent.VK_DOWN) {
                     model = model.mul(new Mat4Transl(0, -step, 0)); change = true;
                 }
-                if ( e.getKeyCode() == KeyEvent.VK_PAGE_UP) {
+                if (e.getKeyCode() == KeyEvent.VK_PAGE_UP) {
                     model = model.mul(new Mat4Transl(0, 0, step)); change = true;
                 }
-                if ( e.getKeyCode() == KeyEvent.VK_PAGE_DOWN) {
+                if (e.getKeyCode() == KeyEvent.VK_PAGE_DOWN) {
                     model = model.mul(new Mat4Transl(0, 0, -step)); change = true;
                 }
-                
+
+                // Rotace - R
                 if (e.getKeyCode() == KeyEvent.VK_R) {
                     model = model.mul(new Mat4RotX(0.1)); change = true;
                 }
 
+                // Zmenšení a zvětšení - X a C
                 if (e.getKeyCode() == KeyEvent.VK_X) {
                     model = model.mul(new Mat4Scale(1.1)); change = true;
                 }
@@ -177,7 +208,14 @@ public class Controller3D {
                     model = model.mul(new Mat4Scale(0.9)); change = true;
                 }
 
-                if (change) activeSolid.setModel(model);
+                if (change) {
+                    activeSolid.setModel(model);
+                    if (activeSolid == light) {
+                        lightPos = new Vec3D(model.get(3,0), model.get(3,1), model.get(3,2));
+                    }
+                }
+
+
 
                 // Ovládání kamery WSAD
                 if (e.getKeyCode() == KeyEvent.VK_W) camera = camera.forward(0.1);
@@ -195,14 +233,16 @@ public class Controller3D {
         zBuffer.getImageBuffer().clear();
         zBuffer.getDepthBuffer().clear();
 
-        //renderer.setView();
         renderer.setView(camera.getViewMatrix());
         renderer.setProjection(projection);
-
+        
         renderer.setWireframe(wireframe);
 
-        for (int i = 0; i < solids.size(); i++) {
-            renderer.render(solids.get(i));
+        for (Solid solid : solids) {
+            if (solid.getShader() instanceof ShaderPhong) {
+                ((ShaderPhong) solid.getShader()).setLightP(lightPos);
+            }
+            renderer.render(solid);
         }
         
         panel.repaint();
